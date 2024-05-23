@@ -42,6 +42,9 @@
 #include "bootutil/mcuboot_status.h"
 #include "flash_map_backend/flash_map_backend.h"
 
+#include <ext_driver/ext_pm.h>
+#include <zephyr/device.h>
+#include <zephyr/storage/flash_map.h>
 #ifdef CONFIG_MCUBOOT_SERIAL
 #include "boot_serial/boot_serial.h"
 #include "serial_adapter/serial_adapter.h"
@@ -319,6 +322,43 @@ static void do_boot(struct boot_rsp *rsp)
  * lock interrupts and jump there. This is the right thing to do for X86 and
  * possibly other platforms.
  */
+
+
+#define PLIC_PRIO (0xe4000000)
+#define PLIC_IRQS (CONFIG_NUM_IRQS - CONFIG_2ND_LVL_ISR_TBL_OFFSET)
+#define BOOT_FLAG_ADR   0x1f8000
+static void restore_all_irq_priorities(void)
+{
+    volatile uint32_t *prio = (volatile uint32_t *)PLIC_PRIO;
+    int i;
+    for(i=1;i<PLIC_IRQS;i++)
+    {
+        *prio = 1U;
+        prio++;
+    }
+}
+
+#define USER_PARTITION		user_para_partition
+#define USER_PARTITION_DEVICE	FIXED_PARTITION_DEVICE(USER_PARTITION)
+#define USER_PARTITION_OFFSET	FIXED_PARTITION_OFFSET(USER_PARTITION)
+#define USER_PARTITION_SIZE 	FIXED_PARTITION_SIZE(USER_PARTITION) 
+
+#define SLOT1_PARTITION		slot1_partition
+#define SLOT1_PARTITION_DEVICE	FIXED_PARTITION_DEVICE(SLOT1_PARTITION)
+#define SLOT1_PARTITION_OFFSET	FIXED_PARTITION_OFFSET(SLOT1_PARTITION)
+
+#define USER_INIT_VAL           0xff
+#define USER_ZB_SW_VAL          0xaa
+#define USER_MATTER_PAIR_VAL    0x55
+
+#define ZB_FW_FLAG_OFFSET       0x20
+
+const struct device * flash_para_dev = USER_PARTITION_DEVICE;
+const struct device * flash_slot1_dev = SLOT1_PARTITION_DEVICE;
+const uint8_t zb_fw_flag[4]={ 0x4b, 0x4e, 0x4c, 0x54};
+uint8_t zb_slot1_flag[4];
+
+
 static void do_boot(struct boot_rsp *rsp)
 {
     void *start;
@@ -332,12 +372,49 @@ static void do_boot(struct boot_rsp *rsp)
     rc = flash_device_base(rsp->br_flash_dev_id, &flash_base);
     assert(rc == 0);
 
-    start = (void *)(flash_base + rsp->br_image_off +
-                     rsp->br_hdr->ih_hdr_size);
+    
 #endif
+    /* Uncomment the following lines for debug purposes */
+    /* printk("flash_base is %x \n",flash_base); */
+    /* printk("image off is %x \n",rsp->br_image_off); */
+    /* printk("hdr size is %x \n",rsp->br_hdr->ih_hdr_size); */
 
-    /* Lock interrupts and dive into the entry point */
-    irq_lock();
+    /* Read the boot flag from the user partition to determine the boot behavior */
+    uint8_t boot_flag=0;
+    flash_read(flash_para_dev, USER_PARTITION_OFFSET, &boot_flag, 1);
+    printk("boot flag is  %x \n",boot_flag);
+
+    /* Get the Zigbee firmware flag from slot1 partition */
+    flash_read(flash_slot1_dev, SLOT1_PARTITION_OFFSET + ZB_FW_FLAG_OFFSET, zb_slot1_flag, sizeof(zb_slot1_flag));
+    if (memcmp(zb_slot1_flag, zb_fw_flag, sizeof(zb_fw_flag))){
+        /* Zigbee firmware flag not found, boot to Matter */
+        printk("Zigbee flag not found \n");
+        start = (void *)(flash_base + rsp->br_image_off +
+                        rsp->br_hdr->ih_hdr_size);
+    }else{
+        if( boot_flag == USER_INIT_VAL ){
+            /* Switch to Zigbee */
+            restore_all_irq_priorities();
+            irq_lock();
+            reg_irq_src0=0;
+            reg_irq_src1=0;
+            core_interrupt_disable();
+            start = (void *)(flash_base + SLOT1_PARTITION_OFFSET);
+        }else if(boot_flag == USER_ZB_SW_VAL || boot_flag == USER_MATTER_PAIR_VAL){
+            /* Commissioning success flag */
+            start = (void *)(flash_base + rsp->br_image_off +
+                        rsp->br_hdr->ih_hdr_size);
+
+        }else {
+            /* Switch to Matter */
+            start = (void *)(flash_base + rsp->br_image_off +
+                        rsp->br_hdr->ih_hdr_size);
+        }
+    }
+
+    // Print the start address for debugging
+    printk("start adr is %x \n",start);
+
     ((void (*)(void))start)();
 }
 #endif
