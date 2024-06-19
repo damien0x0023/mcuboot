@@ -347,11 +347,15 @@ static void restore_all_irq_priorities(void)
 #define SLOT1_PARTITION_DEVICE	FIXED_PARTITION_DEVICE(SLOT1_PARTITION)
 #define SLOT1_PARTITION_OFFSET	FIXED_PARTITION_OFFSET(SLOT1_PARTITION)
 
-#define USER_INIT_VAL           0xff
-#define USER_ZB_SW_VAL          0xaa
-#define USER_MATTER_PAIR_VAL    0x55
 
-#define ZB_FW_FLAG_OFFSET       0x20
+
+#define USER_MATTER_PAIR_VAL    0x55  // jump to matter
+
+#define USER_INIT_VAL           0xff  // init state or others will go into zb 
+#define USER_ZB_SW_VAL          0xaa  // jump to matter,use XIP
+#define USER_MATTER_BACK_ZB     0xa0  // only commisiion fail will back to zb 
+
+#define ZB_FW_FLAG_OFFSET       0x20 //telink fw valid flag offset .
 
 const struct device * flash_para_dev = USER_PARTITION_DEVICE;
 const struct device * flash_slot1_dev = SLOT1_PARTITION_DEVICE;
@@ -392,23 +396,18 @@ static void do_boot(struct boot_rsp *rsp)
         start = (void *)(flash_base + rsp->br_image_off +
                         rsp->br_hdr->ih_hdr_size);
     }else{
-        if( boot_flag == USER_INIT_VAL ){
-            /* Switch to Zigbee */
+        if( boot_flag == USER_MATTER_PAIR_VAL ){
+            /* only paired will switch to matter , Commissioning success flag  */
+            start = (void *)(flash_base + rsp->br_image_off +
+                        rsp->br_hdr->ih_hdr_size);
+        }else{
+            /*others it will go into zigbee */
             restore_all_irq_priorities();
             irq_lock();
             reg_irq_src0=0;
             reg_irq_src1=0;
             core_interrupt_disable();
             start = (void *)(flash_base + SLOT1_PARTITION_OFFSET);
-        }else if(boot_flag == USER_ZB_SW_VAL || boot_flag == USER_MATTER_PAIR_VAL){
-            /* Commissioning success flag */
-            start = (void *)(flash_base + rsp->br_image_off +
-                        rsp->br_hdr->ih_hdr_size);
-
-        }else {
-            /* Switch to Matter */
-            start = (void *)(flash_base + rsp->br_image_off +
-                        rsp->br_hdr->ih_hdr_size);
         }
     }
 
