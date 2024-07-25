@@ -343,10 +343,10 @@ static void restore_all_irq_priorities(void)
 #define USER_PARTITION_OFFSET	FIXED_PARTITION_OFFSET(USER_PARTITION)
 #define USER_PARTITION_SIZE 	FIXED_PARTITION_SIZE(USER_PARTITION) 
 
-#define SLOT1_PARTITION		slot1_partition
-#define SLOT1_PARTITION_DEVICE	FIXED_PARTITION_DEVICE(SLOT1_PARTITION)
-#define SLOT1_PARTITION_OFFSET	FIXED_PARTITION_OFFSET(SLOT1_PARTITION)
-
+#define SLOT0_PARTITION		slot0_partition
+#define SLOT0_PARTITION_DEVICE	FIXED_PARTITION_DEVICE(SLOT0_PARTITION)
+#define SLOT0_PARTITION_OFFSET	FIXED_PARTITION_OFFSET(SLOT0_PARTITION)
+#define SLOT0_ZB_OFFSET     0x140000
 
 
 #define USER_MATTER_PAIR_VAL    0x55  // jump to matter
@@ -358,9 +358,9 @@ static void restore_all_irq_priorities(void)
 #define ZB_FW_FLAG_OFFSET       0x20 //telink fw valid flag offset .
 
 const struct device * flash_para_dev = USER_PARTITION_DEVICE;
-const struct device * flash_slot1_dev = SLOT1_PARTITION_DEVICE;
+const struct device * flash_slot0_dev = SLOT0_PARTITION_DEVICE;
 const uint8_t zb_fw_flag[4]={ 0x4b, 0x4e, 0x4c, 0x54};
-uint8_t zb_slot1_flag[4];
+uint8_t zb_slot0_flag[4];
 
 
 static void do_boot(struct boot_rsp *rsp)
@@ -389,8 +389,8 @@ static void do_boot(struct boot_rsp *rsp)
     printk("boot flag is  %x \n",boot_flag);
 
     /* Get the Zigbee firmware flag from slot1 partition */
-    flash_read(flash_slot1_dev, SLOT1_PARTITION_OFFSET + ZB_FW_FLAG_OFFSET, zb_slot1_flag, sizeof(zb_slot1_flag));
-    if (memcmp(zb_slot1_flag, zb_fw_flag, sizeof(zb_fw_flag))){
+    flash_read(flash_slot0_dev, SLOT0_PARTITION_OFFSET + SLOT0_ZB_OFFSET + ZB_FW_FLAG_OFFSET, zb_slot0_flag, sizeof(zb_slot0_flag));
+    if (memcmp(zb_slot0_flag, zb_fw_flag, sizeof(zb_fw_flag))){
         /* Zigbee firmware flag not found, boot to Matter */
         printk("Zigbee flag not found \n");
         start = (void *)(flash_base + rsp->br_image_off +
@@ -407,7 +407,7 @@ static void do_boot(struct boot_rsp *rsp)
             reg_irq_src0=0;
             reg_irq_src1=0;
             core_interrupt_disable();
-            start = (void *)(flash_base + SLOT1_PARTITION_OFFSET);
+            start = (void *)(flash_base + SLOT0_PARTITION_OFFSET + SLOT0_ZB_OFFSET);
         }
     }
 
